@@ -1,9 +1,16 @@
 #!/bin/bash
 set -e
 
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+echo "Konfiguriere automatische Neustarts ohne Nachfrage..."
+sudo mkdir -p /etc/needrestart/conf.d
+echo '$nrconf{restart} = "a";' | sudo tee /etc/needrestart/conf.d/99-auto-restart.conf > /dev/null
+
 echo "Aktualisiere Ubuntu..."
-sudo apt update
-sudo apt upgrade -y
+sudo apt-get update
+sudo apt-get upgrade -y -o Dpkg::Options::="--force-confold"
 
 echo "Installiere Apache, MariaDB, PHP und Erweiterungen..."
 sudo apt install -y apache2 mariadb-server unzip curl wget \
