@@ -68,6 +68,17 @@ EOF
 
 sudo systemctl restart apache2
 
+echo "Bilder bereitstellen ..."
+sudo mv ./01-Azure-SHOP-Bilder.zip /var/www/html/image/catalog
+cd /var/www/html/image/catalog
+sudo unzip ./01-Azure-SHOP-Bilder.zip
+sudo chown -R www-data:www-data /var/www/html/image
+sudo chmod -R 755 /var/www/html/image
+
+echo "Erstelle Backup-Ordner für SQL-Datei..."
+cd /var/www/html/system/storage/backup
+
+
 PUBLIC_IP=$(curl -s ifconfig.me || echo "DEINE-IP")
 
 echo ""
