@@ -66,13 +66,12 @@ EOF
 
 echo "Rechte setzen..."
 chmod 600 "$WORKDIR/.env"
-chmod +x "$WORKDIR/export_today_orders.py" 2>/dev/null || true
+chmod +x "$WORKDIR/02-Azure-DB-export-orders.py" 2>/dev/null || true
 
 echo ""
 echo "Installation abgeschlossen."
 echo ""
 echo "Teststart:"
-echo "cd $WORKDIR"
 echo "source venv/bin/activate"
-echo "python export_today_orders.py"
+echo "python 02-Azure-DB-export-orders.py"
 echo ""
