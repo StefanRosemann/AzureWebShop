@@ -79,11 +79,6 @@ def connect_azure_sql():
 
 
 def get_kunde_id(order):
-    """
-    Für registrierte Kunden nehmen wir oc_order.customer_id.
-    Für Gastbestellungen ist customer_id oft 0.
-    Dann erzeugen wir eine künstliche KundeID auf Basis der Bestellung.
-    """
     customer_id = int(order.get("customer_id") or 0)
 
     if customer_id > 0:
@@ -106,10 +101,6 @@ def clean_text(value, max_len=None):
 
 
 def fetch_orders(mysql_conn, prefix: str):
-    """
-    Liest alle Bestellungen aus OpenCart.
-    Keine Einschränkung auf den heutigen Tag.
-    """
     sql = f"""
         SELECT
             order_id,
@@ -123,10 +114,12 @@ def fetch_orders(mysql_conn, prefix: str):
 
             payment_address_1,
             payment_address_2,
+            payment_city,
             payment_postcode,
 
             shipping_address_1,
             shipping_address_2,
+            shipping_city,
             shipping_postcode,
 
             DATE(date_added) AS bestell_datum,
@@ -255,13 +248,17 @@ def upsert_kunden(sql_conn, orders):
 
         telefon = clean_text(order.get("telephone"), 50)
 
-        lieferadresse1 = clean_text(order.get("shipping_address_1"), 50)
-        lieferadresse2 = clean_text(order.get("shipping_address_2"), 50)
-        lieferplz = clean_text(order.get("shipping_postcode"), 50)
+        # Neue gewünschte Zuordnung:
+        # Straße aus OpenCart -> Lieferadresse2
+        # PLZ aus OpenCart    -> PostPLZ
+        # Ort aus OpenCart    -> PostAdresse2
+        lieferadresse1 = ""
+        lieferadresse2 = clean_text(order.get("shipping_address_1"), 50)
+        lieferplz = ""
 
-        postadresse1 = clean_text(order.get("payment_address_1"), 50)
-        postadresse2 = clean_text(order.get("payment_address_2"), 50)
-        postplz = clean_text(order.get("payment_postcode"), 50)
+        postadresse1 = ""
+        postadresse2 = clean_text(order.get("shipping_city"), 50)
+        postplz = clean_text(order.get("shipping_postcode"), 50)
 
         cur.execute(
             sql,
