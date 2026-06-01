@@ -105,7 +105,11 @@ def clean_text(value, max_len=None):
     return value
 
 
-def fetch_today_orders(mysql_conn, prefix: str):
+def fetch_orders(mysql_conn, prefix: str):
+    """
+    Liest alle Bestellungen aus OpenCart.
+    Keine Einschränkung auf den heutigen Tag.
+    """
     sql = f"""
         SELECT
             order_id,
@@ -129,8 +133,6 @@ def fetch_today_orders(mysql_conn, prefix: str):
             DATE(date_modified) AS liefer_datum,
             DATE(date_added) AS erstellungsdatum
         FROM {prefix}order
-        WHERE date_added >= CURDATE()
-          AND date_added < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
         ORDER BY order_id;
     """
 
@@ -233,7 +235,6 @@ def upsert_kunden(sql_conn, orders):
     """
 
     cur = sql_conn.cursor()
-
     already_done = set()
 
     for order in orders:
@@ -376,7 +377,7 @@ def upsert_bestellposition(sql_conn, positions):
 def main():
     prefix = os.getenv("OPENCART_TABLE_PREFIX", "oc_")
 
-    print("Starte Export der heutigen OpenCart-Bestellungen inklusive Kundendaten...")
+    print("Starte Export aller OpenCart-Bestellungen inklusive Kundendaten...")
     print(f"Heutiges Datum laut Server: {date.today()}")
     print(f"Arbeitsverzeichnis: {BASE_DIR}")
 
@@ -384,17 +385,17 @@ def main():
     sql_conn = connect_azure_sql()
 
     try:
-        orders = fetch_today_orders(mysql_conn, prefix)
-        print(f"Gefundene Bestellungen heute: {len(orders)}")
+        orders = fetch_orders(mysql_conn, prefix)
+        print(f"Gefundene Bestellungen insgesamt: {len(orders)}")
 
         if not orders:
-            print("Keine heutigen Bestellungen gefunden.")
+            print("Keine Bestellungen gefunden.")
             return
 
         order_ids = [order["order_id"] for order in orders]
 
         positions = fetch_order_positions(mysql_conn, prefix, order_ids)
-        print(f"Gefundene Bestellpositionen: {len(positions)}")
+        print(f"Gefundene Bestellpositionen insgesamt: {len(positions)}")
 
         print("Schreibe dbo.Kunde...")
         upsert_kunden(sql_conn, orders)
