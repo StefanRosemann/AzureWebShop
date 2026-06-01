@@ -78,13 +78,56 @@ def connect_azure_sql():
     return pyodbc.connect(connection_string)
 
 
+def get_kunde_id(order):
+    """
+    Für registrierte Kunden nehmen wir oc_order.customer_id.
+    Für Gastbestellungen ist customer_id oft 0.
+    Dann erzeugen wir eine künstliche KundeID auf Basis der Bestellung.
+    """
+    customer_id = int(order.get("customer_id") or 0)
+
+    if customer_id > 0:
+        return customer_id
+
+    return 900000000 + int(order["order_id"])
+
+
+def clean_text(value, max_len=None):
+    if value is None:
+        value = ""
+
+    value = str(value)
+    value = value.replace("\r", " ").replace("\n", " ").strip()
+
+    if max_len is not None:
+        value = value[:max_len]
+
+    return value
+
+
 def fetch_today_orders(mysql_conn, prefix: str):
     sql = f"""
         SELECT
             order_id,
+            customer_id,
             customer_group_id,
+
+            firstname,
+            lastname,
+            email,
+            telephone,
+
+            payment_address_1,
+            payment_address_2,
+            payment_postcode,
+
+            shipping_address_1,
+            shipping_address_2,
+            shipping_postcode,
+
             DATE(date_added) AS bestell_datum,
-            DATE(date_modified) AS liefer_datum
+            DATE(date_modified) AS liefer_datum,
+            DATE(date_added) AS erstellungsdatum
         FROM {prefix}order
         WHERE date_added >= CURDATE()
           AND date_added < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
@@ -116,6 +159,128 @@ def fetch_order_positions(mysql_conn, prefix: str, order_ids):
     with mysql_conn.cursor() as cur:
         cur.execute(sql, order_ids)
         return cur.fetchall()
+
+
+def upsert_kunden(sql_conn, orders):
+    sql = """
+        MERGE dbo.Kunde AS target
+        USING (
+            SELECT
+                ? AS KundeID,
+                ? AS KundeName,
+                ? AS Erstellungsdatum,
+                ? AS StandardRabatt,
+                ? AS Telefon,
+                ? AS Fax,
+                ? AS WebsiteURL,
+                ? AS Lieferadresse1,
+                ? AS Lieferadresse2,
+                ? AS LieferPLZ,
+                ? AS PostAdresse1,
+                ? AS PostAdresse2,
+                ? AS PostPLZ,
+                ? AS BearbeitetVon
+        ) AS source
+        ON target.KundeID = source.KundeID
+        WHEN MATCHED THEN
+            UPDATE SET
+                KundeName = source.KundeName,
+                Erstellungsdatum = source.Erstellungsdatum,
+                StandardRabatt = source.StandardRabatt,
+                Telefon = source.Telefon,
+                Fax = source.Fax,
+                WebsiteURL = source.WebsiteURL,
+                Lieferadresse1 = source.Lieferadresse1,
+                Lieferadresse2 = source.Lieferadresse2,
+                LieferPLZ = source.LieferPLZ,
+                PostAdresse1 = source.PostAdresse1,
+                PostAdresse2 = source.PostAdresse2,
+                PostPLZ = source.PostPLZ,
+                BearbeitetVon = source.BearbeitetVon
+        WHEN NOT MATCHED THEN
+            INSERT (
+                KundeID,
+                KundeName,
+                Erstellungsdatum,
+                StandardRabatt,
+                Telefon,
+                Fax,
+                WebsiteURL,
+                Lieferadresse1,
+                Lieferadresse2,
+                LieferPLZ,
+                PostAdresse1,
+                PostAdresse2,
+                PostPLZ,
+                BearbeitetVon
+            )
+            VALUES (
+                source.KundeID,
+                source.KundeName,
+                source.Erstellungsdatum,
+                source.StandardRabatt,
+                source.Telefon,
+                source.Fax,
+                source.WebsiteURL,
+                source.Lieferadresse1,
+                source.Lieferadresse2,
+                source.LieferPLZ,
+                source.PostAdresse1,
+                source.PostAdresse2,
+                source.PostPLZ,
+                source.BearbeitetVon
+            );
+    """
+
+    cur = sql_conn.cursor()
+
+    already_done = set()
+
+    for order in orders:
+        kunde_id = get_kunde_id(order)
+
+        if kunde_id in already_done:
+            continue
+
+        already_done.add(kunde_id)
+
+        name = clean_text(
+            f"{order.get('firstname', '')} {order.get('lastname', '')}",
+            50
+        )
+
+        if not name:
+            name = f"Kunde {kunde_id}"
+
+        telefon = clean_text(order.get("telephone"), 50)
+
+        lieferadresse1 = clean_text(order.get("shipping_address_1"), 50)
+        lieferadresse2 = clean_text(order.get("shipping_address_2"), 50)
+        lieferplz = clean_text(order.get("shipping_postcode"), 50)
+
+        postadresse1 = clean_text(order.get("payment_address_1"), 50)
+        postadresse2 = clean_text(order.get("payment_address_2"), 50)
+        postplz = clean_text(order.get("payment_postcode"), 50)
+
+        cur.execute(
+            sql,
+            kunde_id,
+            name,
+            order["erstellungsdatum"],
+            0.0,
+            telefon,
+            "",
+            clean_text(order.get("email"), 255),
+            lieferadresse1,
+            lieferadresse2,
+            lieferplz,
+            postadresse1,
+            postadresse2,
+            postplz,
+            1,
+        )
+
+    sql_conn.commit()
 
 
 def upsert_bestellung(sql_conn, orders):
@@ -155,7 +320,7 @@ def upsert_bestellung(sql_conn, orders):
         cur.execute(
             sql,
             int(order["order_id"]),
-            int(order["customer_group_id"]),
+            get_kunde_id(order),
             order["bestell_datum"],
             order["liefer_datum"],
         )
@@ -211,7 +376,7 @@ def upsert_bestellposition(sql_conn, positions):
 def main():
     prefix = os.getenv("OPENCART_TABLE_PREFIX", "oc_")
 
-    print("Starte Export der heutigen OpenCart-Bestellungen...")
+    print("Starte Export der heutigen OpenCart-Bestellungen inklusive Kundendaten...")
     print(f"Heutiges Datum laut Server: {date.today()}")
     print(f"Arbeitsverzeichnis: {BASE_DIR}")
 
@@ -230,6 +395,9 @@ def main():
 
         positions = fetch_order_positions(mysql_conn, prefix, order_ids)
         print(f"Gefundene Bestellpositionen: {len(positions)}")
+
+        print("Schreibe dbo.Kunde...")
+        upsert_kunden(sql_conn, orders)
 
         print("Schreibe dbo.Bestellung...")
         upsert_bestellung(sql_conn, orders)
